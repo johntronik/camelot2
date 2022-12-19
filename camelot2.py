@@ -38,6 +38,7 @@ from camelot.core import (
 
 # ref: https://needtec.sakura.ne.jp/wod07672/2020/05/03/camelot%E3%81%A7%E7%82%B9%E7%B7%9A%E3%82%92%E5%AE%9F%E7%B7%9A%E3%81%A8%E3%81%97%E3%81%A6%E5%87%A6%E7%90%86%E3%81%99%E3%82%8B/
 
+
 def image_proc_tate_tensen(threshold):
     el = np.zeros((5, 5), np.uint8)
     el[:, 1] = 1
@@ -52,6 +53,7 @@ def image_proc_yoko_tensen(threshold):
     threshold = cv2.dilate(threshold, el, iterations=1)
     threshold = cv2.erode(threshold, el, iterations=1)
     return threshold
+
 
 def image_proc_both_tensen(threshold):
     el = np.zeros((5, 5), np.uint8)
@@ -132,7 +134,8 @@ class Lattice2(Lattice):
         image_height_scaler = image_height / float(self.pdf_height)
         pdf_width_scaler = self.pdf_width / float(image_width)
         pdf_height_scaler = self.pdf_height / float(image_height)
-        image_scalers = (image_width_scaler, image_height_scaler, self.pdf_height)
+        image_scalers = (image_width_scaler,
+                         image_height_scaler, self.pdf_height)
         pdf_scalers = (pdf_width_scaler, pdf_height_scaler, image_height)
 
         ############
@@ -277,7 +280,8 @@ class Lattice2(Lattice):
         accuracy = compute_accuracy([[100, pos_errors]])
 
         if self.copy_text is not None:
-            table = Lattice._copy_spanning_text(table, copy_text=self.copy_text)
+            table = Lattice._copy_spanning_text(
+                table, copy_text=self.copy_text)
 
         data = table.data
         table.df = pd.DataFrame(data)
@@ -353,7 +357,8 @@ class PDFHandler2(PDFHandler):
                 os.path.join(tempdir, "page-{0}.pdf".format(p)) for p in self.pages
             ]
             # Lattice -> Lattice2
-            parser = Lattice2(**kwargs) if flavor == "lattice" else Stream(**kwargs)
+            parser = Lattice2(
+                **kwargs) if flavor == "lattice" else Stream(**kwargs)
             for p in pages:
                 t = parser.extract_tables(
                     p, suppress_stdout=suppress_stdout, layout_kwargs=layout_kwargs
@@ -393,7 +398,58 @@ def read_pdf(
         return tables
 
 
+def img_replace(page, xref, filename=None, stream=None, pixmap=None):
+    """Replace image identified by xref.
+    Args:
+        page: a fitz.Page object
+        xref: cross reference number of image to replace
+        filename, stream, pixmap: must be given as for
+        page.insert_image().
+    """
+    if bool(filename) + bool(stream) + bool(pixmap) != 1:
+        raise ValueError("Exactly one of filename/stream/pixmap must be given")
+    doc = page.parent  # the owning document
+    # insert new image anywhere in page
+    new_xref = page.insert_image(
+        page.rect, filename=filename, stream=stream, pixmap=pixmap
+    )
+    doc.xref_copy(new_xref, xref)  # copy over new to old
+    last_contents_xref = page.get_contents()[-1]
+    # new image insertion has created a new /Contents source,
+    # which we will set to spaces now
+    doc.update_stream(last_contents_xref, b" ")
+
+
+def remove_images(filepath) -> str:
+    import fitz
+    pdf = fitz.open(filepath)
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        for image in page.get_images():
+            xref, *_ = image
+            pix = fitz.Pixmap(fitz.csGRAY, (0, 0, 1, 1), 1)
+            pix.clear_with()  # clear all samples bytes to 0x00
+            img_replace(page, xref, pixmap=pix)
+        page.apply_redactions()
+    path_wo_images = filepath[:-4] + '_noimage.pdf'
+    pdf.save(path_wo_images, deflate=True)
+    return path_wo_images
+
+
+def load(filepath, options):
+    import pikepdf
+    pdf = pikepdf.open(filepath, allow_overwriting_input=True)
+    pdf.save(filepath)
+
+    if options['remove_images']:
+        filepath = remove_images(filepath)
+    print(filepath)
+    import camelot2
+    tables = camelot2.read_pdf(filepath, **options["camelot"])
+    return tables
+
 # ---
+
 
 try:
     import matplotlib.pyplot as plt
@@ -437,7 +493,7 @@ class PlotMethods(object):
         plot_method = getattr(self, kind)
         return plot_method(table)
 
-    def text(self, table, figsize=(12,12)):
+    def text(self, table, figsize=(12, 12)):
         """Generates a plot for all text elements present
         on the PDF page.
         Parameters
@@ -448,17 +504,18 @@ class PlotMethods(object):
         fig : matplotlib.fig.Figure
         """
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
         xs, ys = [], []
         for t in table._text:
             xs.extend([t[0], t[2]])
             ys.extend([t[1], t[3]])
-            ax.add_patch(patches.Rectangle((t[0], t[1]), t[2] - t[0], t[3] - t[1]))
+            ax.add_patch(patches.Rectangle(
+                (t[0], t[1]), t[2] - t[0], t[3] - t[1]))
         ax.set_xlim(min(xs) - 10, max(xs) + 10)
         ax.set_ylim(min(ys) - 10, max(ys) + 10)
         return fig
 
-    def grid(self, table, figsize=(12,12)):
+    def grid(self, table, figsize=(12, 12)):
         """Generates a plot for the detected table grids
         on the PDF page.
         Parameters
@@ -469,7 +526,7 @@ class PlotMethods(object):
         fig : matplotlib.fig.Figure
         """
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
         for row in table.cells:
             for cell in row:
                 if cell.left:
@@ -482,7 +539,7 @@ class PlotMethods(object):
                     ax.plot([cell.lb[0], cell.rb[0]], [cell.lb[1], cell.rb[1]])
         return fig
 
-    def contour(self, table, figsize=(12,12)):
+    def contour(self, table, figsize=(12, 12)):
         """Generates a plot for all table boundaries present
         on the PDF page.
         Parameters
@@ -499,7 +556,7 @@ class PlotMethods(object):
             img, table_bbox = (None, {table._bbox: None})
             _FOR_LATTICE = False
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
 
         xs, ys = [], []
         if not _FOR_LATTICE:
@@ -528,7 +585,7 @@ class PlotMethods(object):
             ax.imshow(img)
         return fig
 
-    def textedge(self, table, figsize=(12,12)):
+    def textedge(self, table, figsize=(12, 12)):
         """Generates a plot for relevant textedges.
         Parameters
         ----------
@@ -538,13 +595,14 @@ class PlotMethods(object):
         fig : matplotlib.fig.Figure
         """
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
         xs, ys = [], []
         for t in table._text:
             xs.extend([t[0], t[2]])
             ys.extend([t[1], t[3]])
             ax.add_patch(
-                patches.Rectangle((t[0], t[1]), t[2] - t[0], t[3] - t[1], color="blue")
+                patches.Rectangle((t[0], t[1]), t[2] - t[0],
+                                  t[3] - t[1], color="blue")
             )
         ax.set_xlim(min(xs) - 10, max(xs) + 10)
         ax.set_ylim(min(ys) - 10, max(ys) + 10)
@@ -554,7 +612,7 @@ class PlotMethods(object):
 
         return fig
 
-    def joint(self, table, figsize=(12,12)):
+    def joint(self, table, figsize=(12, 12)):
         """Generates a plot for all line intersections present
         on the PDF page.
         Parameters
@@ -566,7 +624,7 @@ class PlotMethods(object):
         """
         img, table_bbox = table._image
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
         x_coord = []
         y_coord = []
         for k in table_bbox.keys():
@@ -577,7 +635,7 @@ class PlotMethods(object):
         ax.imshow(img)
         return fig
 
-    def line(self, table, figsize=(12,12)):
+    def line(self, table, figsize=(12, 12)):
         """Generates a plot for all line segments present
         on the PDF page.
         Parameters
@@ -588,7 +646,7 @@ class PlotMethods(object):
         fig : matplotlib.fig.Figure
         """
         fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111) #, aspect="equal")
+        ax = fig.add_subplot(111)  # , aspect="equal")
         vertical, horizontal = table._segments
         for v in vertical:
             ax.plot([v[0], v[2]], [v[1], v[3]])
