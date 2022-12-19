@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import copy
 import cv2
+import pikepdf
+import fitz
 
 from PyPDF2 import PdfFileReader
 from camelot.handlers import PDFHandler
@@ -397,6 +399,7 @@ def read_pdf(
         )
         return tables
 
+# --- #
 
 def img_replace(page, xref, filename=None, stream=None, pixmap=None):
     """Replace image identified by xref.
@@ -421,7 +424,6 @@ def img_replace(page, xref, filename=None, stream=None, pixmap=None):
 
 
 def remove_images(filepath) -> str:
-    import fitz
     pdf = fitz.open(filepath)
     for i in range(pdf.page_count):
         page = pdf[i]
@@ -437,15 +439,13 @@ def remove_images(filepath) -> str:
 
 
 def load(filepath, options):
-    import pikepdf
     pdf = pikepdf.open(filepath, allow_overwriting_input=True)
     pdf.save(filepath)
 
     if options['remove_images']:
         filepath = remove_images(filepath)
     print(filepath)
-    import camelot2
-    tables = camelot2.read_pdf(filepath, **options["camelot"])
+    tables = read_pdf(filepath, **options["camelot"])
     return tables
 
 # ---
